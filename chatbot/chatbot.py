@@ -1,3 +1,5 @@
+import logging
+
 from rags.rag import RAG
 
 class Chatbot:
@@ -18,16 +20,13 @@ class Chatbot:
         chunks = self.rag.retrieve(query_embedding)
 
         if not chunks:
-            rephrased = self.rag.rephrase_query(query)
+            rephrased = self.rag.rephrase_query(query, history=self.conversation_history)
             rephrased_embedding = self.rag.embed_query(rephrased)
             chunks = self.rag.retrieve(rephrased_embedding)
 
-        if not chunks:
-            return None
+        context = self.rag.build_context(chunks) if chunks else ""
 
-        context = self.rag.build_context(chunks)
-        user_turn = f"QUESTION: '{query}'\n\n{context}\nANSWER:"
-
+        user_turn = f"QUESTION: '{query}'\n\n{context}\nANSWER:" if context else query
         self.conversation_history.append({"role": "user", "content": user_turn})
 
         messages = [
