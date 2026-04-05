@@ -1,0 +1,11 @@
+sentence_transformers
+sklearn
+numpy~=2.4.4
+pandas~=3.0.2
+torch~=2.11.0
+sentence-transformers~=5.3.0
+requests~=2.33.1
+openai~=2.30.0
+fastapi~=0.135.3
+uvicorn
+pydantic~=2.12.5
