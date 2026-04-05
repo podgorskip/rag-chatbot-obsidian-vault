@@ -587,7 +587,7 @@
     body.appendChild(roleEl);
     body.appendChild(bubble);
 
-    if (tokens !== null && !isError) {
+    if (tokens !== null && !isError && tokens > 0) {
       const badge = document.createElement('div');
       badge.className = 'token-badge';
       badge.innerHTML = `<span>◆</span> ${tokens.toLocaleString()} tokens`;
