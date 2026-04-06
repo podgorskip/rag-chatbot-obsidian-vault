@@ -6,6 +6,7 @@
 <title>Vault - AI Knowledge Base</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root {
     --bg:        #080808;
@@ -194,7 +195,6 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 14px; font-weight: 600; flex-shrink: 0;
   }
-  /* Lowered contrast for avatars */
   .msg.user .msg-avatar { background: var(--surface); color: var(--text); border: 1px solid var(--border-light); }
   .msg.bot  .msg-avatar { background: transparent; color: var(--text); border: 1px solid var(--border); }
 
@@ -206,10 +206,56 @@
     line-height: 1.6; font-size: 15px;
   }
 
-  /* Softened user and bot bubbles */
   .msg.user .msg-bubble { background: var(--user-bg); border: 1px solid var(--border-light); color: var(--text); }
   .msg.bot  .msg-bubble { background: var(--bot-bg); border: 1px solid var(--border); color: var(--text); }
   .msg-error .msg-bubble { background: #1F1111; border: 1px solid #3A1C1C; color: #FF8A8A; }
+
+  /* ── Markdown Output Styles ── */
+  .msg-bubble p { margin-bottom: 1em; }
+  .msg-bubble p:last-child { margin-bottom: 0; }
+  .msg-bubble pre {
+    background: #111;
+    padding: 16px;
+    border-radius: var(--radius);
+    overflow-x: auto;
+    margin-bottom: 1em;
+    border: 1px solid var(--border-light);
+  }
+  .msg-bubble code {
+    font-family: 'Inter', monospace;
+    background: #111;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    border: 1px solid var(--border-light);
+  }
+  .msg-bubble pre code {
+    background: transparent;
+    padding: 0;
+    border: none;
+  }
+  .msg-bubble ul, .msg-bubble ol {
+    margin-bottom: 1em;
+    padding-left: 20px;
+  }
+  .msg-bubble li { margin-bottom: 0.4em; }
+  .msg-bubble a { color: var(--coral); text-decoration: none; }
+  .msg-bubble a:hover { text-decoration: underline; }
+  .msg-bubble h1, .msg-bubble h2, .msg-bubble h3, .msg-bubble h4 {
+    margin: 1.5em 0 0.5em;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .msg-bubble h1 { font-size: 1.4em; }
+  .msg-bubble h2 { font-size: 1.2em; }
+  .msg-bubble h3 { font-size: 1.1em; }
+  .msg-bubble blockquote {
+    border-left: 3px solid var(--border-light);
+    padding-left: 16px;
+    color: var(--muted);
+    margin-bottom: 1em;
+  }
+  .msg-bubble *:last-child { margin-bottom: 0; }
 
   .token-badge {
     display: inline-flex; align-items: center; gap: 6px;
@@ -427,6 +473,11 @@
 </div>
 
 <script>
+  marked.setOptions({
+    breaks: true,
+    gfm: true
+  });
+
   const logEl   = document.getElementById('log');
   const inputEl = document.getElementById('input');
   const sendBtn = document.getElementById('send-btn');
@@ -577,7 +628,12 @@
 
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
-    bubble.textContent = text;
+
+    if (role === 'bot' && !isError) {
+      bubble.innerHTML = marked.parse(text);
+    } else {
+      bubble.textContent = text;
+    }
 
     body.appendChild(roleEl);
     body.appendChild(bubble);
@@ -592,7 +648,13 @@
     wrap.appendChild(avatar);
     wrap.appendChild(body);
     logEl.appendChild(wrap);
-    logEl.scrollTop = logEl.scrollHeight;
+
+    setTimeout(() => {
+      logEl.scrollTo({
+        top: wrap.offsetTop - 40,
+        behavior: 'smooth'
+      });
+    }, 10);
   }
 
   function appendConfirmation(pendingQuery) {
@@ -614,7 +676,13 @@
       </div>`;
 
     logEl.appendChild(wrap);
-    logEl.scrollTop = logEl.scrollHeight;
+
+    setTimeout(() => {
+      logEl.scrollTo({
+        top: wrap.offsetTop - 40,
+        behavior: 'smooth'
+      });
+    }, 10);
 
     document.getElementById('confirm-yes').addEventListener('click', async () => {
       disableConfirmButtons();
@@ -647,7 +715,13 @@
       </div>`;
     emptyEl.style.display = 'none';
     logEl.appendChild(el);
-    logEl.scrollTop = logEl.scrollHeight;
+
+    setTimeout(() => {
+      logEl.scrollTo({
+        top: el.offsetTop - 40,
+        behavior: 'smooth'
+      });
+    }, 10);
   }
 
   function hideThinking() { document.getElementById('thinking')?.remove(); }
@@ -685,7 +759,8 @@
         if(text.toLowerCase().includes('external')) {
            appendConfirmation(text);
         } else {
-           appendMessage('bot', 'Backend unreachable. This is a mockup response mirroring the softer UI aesthetic. You asked: ' + text);
+           const mockMarkdown = `Backend unreachable.`;
+           appendMessage('bot', mockMarkdown);
            setInputBusy(false);
         }
       }, 1000);
