@@ -29,7 +29,8 @@ Vault is a local, privacy-first AI chatbot that reads your Obsidian vault, index
 
 ## How it works
 
-https://github.com/user-attachments/assets/030de6a5-3c6b-4ce7-b748-e818aa9ab00d
+
+https://github.com/user-attachments/assets/56ae7ca0-aed0-4c6f-b173-247251209e08
 
 
 ```
@@ -137,6 +138,8 @@ openai==1.40.6
 fastapi==0.115.6
 uvicorn==0.30.6
 pydantic==2.8.2
+python-dotenv~=1.2.2
+redis
 ```
 
 ### 3. Install and start Ollama
@@ -225,7 +228,8 @@ http://localhost:8000
 
 Changes take effect immediately without restarting the server.
 
-<img width="1116" height="620" alt="vault-chatbot-settings" src="https://github.com/user-attachments/assets/0673219a-d7f2-4680-8d00-8d1bf5a074b6" />
+<img width="1113" height="636" alt="vault-settings" src="https://github.com/user-attachments/assets/6369fb4c-3756-488f-8363-b61abb134518" />
+
 
 ---
 
