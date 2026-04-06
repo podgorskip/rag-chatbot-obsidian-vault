@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 import uuid
 from typing import Callable
@@ -109,6 +110,7 @@ class Chatbot:
         self._save_history(session_id, history)
         self._touch_meta(session_id)
         self._track_tokens(response.usage)
+        self._log(query, context, answer)
 
         return answer, response.usage, self.rag.cumulative_tokens
 
@@ -118,3 +120,8 @@ class Chatbot:
         self.rag.cumulative_tokens["prompt_tokens"]     += usage.prompt_tokens
         self.rag.cumulative_tokens["completion_tokens"] += usage.completion_tokens
         self.rag.cumulative_tokens["total_tokens"]      += usage.total_tokens
+
+    def _log(self, query: str, context: str, answer: str):
+        logging.info("[QUESTION]: %s", query)
+        logging.info("[CONTEXT]: %s", context)
+        logging.info("[ANSWER]: %s", answer)
