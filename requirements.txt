@@ -8,3 +8,5 @@ openai==1.40.6
 fastapi==0.115.6
 uvicorn==0.30.6
 pydantic==2.8.2
+python-dotenv~=1.2.2
+redis
