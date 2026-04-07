@@ -6,6 +6,8 @@ from sentence_transformers import SentenceTransformer
 import logging
 import numpy as np
 import pandas as pd
+from rank_bm25 import BM25Okapi
+from rags.utils import estimate_tokens
 
 class RAG:
   def __init__(
@@ -30,25 +32,33 @@ class RAG:
         }
 
   def _prepare_chunks(self, candidates: pd.DataFrame) -> list[dict[str, int | Any]]:
-    chunks = []
-    prev_sim = candidates.iloc[0]['similarity']
+      chunks = []
+      if candidates.empty:
+          return chunks
+      top_sim = candidates.iloc[0]['similarity']
+      current_tokens = 0
 
-    for row in candidates.itertuples(index=False):
-      curr_sim = row.similarity
-      delta = abs(curr_sim - prev_sim)
+      for row in candidates.itertuples(index=False):
+          curr_sim = row.similarity
+          delta = abs(top_sim - curr_sim)
 
-      if delta > self.config.DELTA_CUTOFF:
-        break
+          if delta > self.config.delta_cutoff:
+              break
 
-      chunks.append({
-          "title": row.title,
-          "content": row.content,
-          "similarity": curr_sim,
-          "length": len(row.content)
-      })
-      prev_sim = curr_sim
+          estimated_tokens = estimate_tokens(row.content)
+          if current_tokens + estimated_tokens > self.config.max_context_tokens:
+              break
 
-    return chunks
+          chunks.append({
+              "title": row.title,
+              "content": row.content,
+              "similarity": curr_sim,
+              "length": len(row.content)
+          })
+
+          current_tokens += estimated_tokens
+
+      return chunks
 
   def _track_tokens(self, usage) -> None:
       if self.client.provider != "openai":
@@ -58,34 +68,53 @@ class RAG:
           self.cumulative_tokens["completion_tokens"] += usage.completion_tokens
           self.cumulative_tokens["total_tokens"] += usage.total_tokens
 
-  def _estimate_tokens(self, text: str) -> int:
-    return len(text) // 4
-
   def embed_query(self, query: str) -> Tensor:
     return self.embedding_model.encode(query, normalize_embeddings=True)
 
-  def retrieve(self, query_embedding: Tensor) -> list:
-    self.df['similarity'] = np.dot(np.stack(self.df['embedding']), query_embedding)
-    threshold = self.df['similarity'].quantile(1 - self.config.TOP_K)
-    candidates = self.df[self.df['similarity'] >= threshold]
-    candidates = candidates[candidates['similarity'] > self.config.MIN_SIMILARITY]
+  def _compute_embedding_matrix(self) -> np.ndarray:
+      if not hasattr(self, '_embedding_matrix'):
+          self._embedding_matrix = np.stack(self.df['embedding'])
+      return self._embedding_matrix
 
-    if candidates.empty:
-      return []
+  def _semantic_scores(self, query_embedding: Tensor) -> np.ndarray:
+      return np.dot(self._compute_embedding_matrix(), query_embedding)
 
-    return self._prepare_chunks(candidates)
+  def _bm25_scores(self, query: str) -> np.ndarray:
+      if not hasattr(self, '_bm25'):
+          tokenized_corpus = [str(text).lower().split() for text in self.df['content']]
+          self._bm25 = BM25Okapi(tokenized_corpus)
 
-  def rephrase_query(self, original_query: str, history: list = None) -> str:
-      messages = [{"role": "system", "content": self.config.REPHRASE_PROMPT}]
+      tokenized_query = query.lower().split()
+      scores = self._bm25.get_scores(tokenized_query)
+      max_score = scores.max()
+      return scores / max_score if max_score > 0 else scores
 
-      if history:
-          messages.extend(history[-4:])
+  def retrieve(self, query: str, query_embedding: Tensor) -> list:
+      semantic = self._semantic_scores(query_embedding)
+      bm25 = self._bm25_scores(query)
+      combined = (
+              self.config.semantic_weight * semantic +
+              self.config.bm25_weight * bm25
+      )
 
-      messages.append({"role": "user", "content": original_query})
+      self.df['similarity'] = combined
+      threshold = self.df['similarity'].quantile(1 - self.config.top_fraction)
+      candidates = self.df[
+          (self.df['similarity'] >= threshold) &
+          (self.df['similarity'] > self.config.min_similarity)
+      ]
+      candidates = candidates.sort_values(by='similarity', ascending=False)
 
+      if candidates.empty:
+          return []
+
+      return self._prepare_chunks(candidates)
+
+  def process_query(self, question: str, history: str, prompt_template: str) -> str:
+      prompt = prompt_template.format(history=history, question=question)
       response = self.client.chat.completions.create(
           model=self.llm_model,
-          messages=messages
+          messages=[{"role": "user", "content": prompt}]
       )
       self._track_tokens(response.usage)
       return response.choices[0].message.content.strip()
@@ -96,9 +125,9 @@ class RAG:
 
     for chunk in chunks:
       chunk_text = f"PASSAGE ({chunk['title']}): '{chunk['content']}'\n"
-      chunk_tokens = self._estimate_tokens(chunk_text)
+      chunk_tokens = estimate_tokens(chunk_text)
 
-      if current_context_tokens + chunk_tokens <= self.config.MAX_CONTEXT_TOKENS:
+      if current_context_tokens + chunk_tokens <= self.config.max_context_tokens:
         context_text += chunk_text
         current_context_tokens += chunk_tokens
       else:
@@ -106,28 +135,3 @@ class RAG:
         break
 
     return context_text
-
-  def ask(self, query: str):
-    query_embedding = self.embed_query(query)
-    chunks = self.retrieve(query_embedding)
-
-    if not chunks:
-      rephrased = self.rephrase_query(query)
-      rephrased_embedding = self.embed_query(rephrased)
-      chunks = self.retrieve(rephrased_embedding)
-
-    if not chunks:
-      return None
-
-    context = self.build_context(chunks)
-    prompt = f"QUESTION: '{query}'\n\n{context}\nANSWER:"
-
-    response = self.client.chat.completions.create(
-        model=self.llm_model,
-        messages=[
-            {"role": "system", "content": self.config.ANSWER_PROMPT},
-            {"role": "user", "content": prompt}
-        ]
-    )
-    self._track_tokens(response.usage)
-    return response.choices[0].message.content, response.usage, self.cumulative_tokens
