@@ -1,10 +1,12 @@
 import json
 import logging
+import textwrap
 import time
 import uuid
 from typing import Callable
 import redis
 from rags.rag import RAG
+from rags.utils import format_history
 
 class Chatbot:
     SESSIONS_ZSET = "chat:sessions"
@@ -69,48 +71,57 @@ class Chatbot:
         self.redis.zadd(self.SESSIONS_ZSET, {session_id: now})
 
     def chat(
-        self,
-        query: str,
-        session_id: str,
-        confirm_external: Callable[[], bool] | None = None,
-    ):
+            self,
+            query: str,
+            session_id: str,
+            confirm_external: Callable[[], bool] | None = None,
+    ) -> tuple[str, object, int] | None:
         history = self._load_history(session_id)
-        title = query[:60] + ("…" if len(query) > 60 else "")
+        history_str = format_history(history)
+        title = textwrap.shorten(query, width=60, placeholder="…")
         self._touch_meta(session_id, title)
 
-        query_embedding = self.rag.embed_query(query)
-        chunks = self.rag.retrieve(query_embedding)
+        standalone_query = self.rag.process_query(query, history_str, self.rag.config.contextualize_prompt)
+        query_embedding = self.rag.embed_query(standalone_query)
+        chunks = self.rag.retrieve(query, query_embedding)
 
         if not chunks:
-            rephrased = self.rag.rephrase_query(query, history=history)
-            chunks = self.rag.retrieve(self.rag.embed_query(rephrased))
+            logging.debug("Fallback retrieval returned no chunks for session=%s", session_id)
 
         context = self.rag.build_context(chunks) if chunks else ""
-
-        if not context:
-            if confirm_external is not None and not confirm_external():
-                return None
-
-        llm_content = f"QUESTION: '{query}'\n\n{context}\nANSWER:" if context else query
-        history.append({"role": "user", "content": llm_content, "display": query})
-        self._save_history(session_id, history)
-
-        messages = [
-            {"role": "system", "content": self.rag.config.ANSWER_PROMPT},
-            *[{"role": t["role"], "content": t["content"]} for t in history],
-        ]
-
-        response = self.rag.client.chat.completions.create(
-            model=self.rag.llm_model,
-            messages=messages
+        system_prompt = self.rag.config.answer_prompt.format(
+            context=context or "No context available."
         )
 
+        if not context:
+            if confirm_external is None or not confirm_external():
+                return None
+            system_prompt = self.rag.config.external_prompt
+            logging.info("Using external prompt for session=%s, prompt")
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            *[{"role": t["role"], "content": t["content"]} for t in history],
+            {"role": "user", "content": standalone_query},
+        ]
+
+        try:
+            response = self.rag.client.chat.completions.create(
+                model=self.rag.llm_model,
+                messages=messages,
+            )
+        except Exception as e:
+            raise RuntimeError(f"LLM call failed for session={session_id!r}: {e}") from e
+
         answer = response.choices[0].message.content
+
+        history.append({"role": "user", "content": standalone_query})
         history.append({"role": "assistant", "content": answer})
         self._save_history(session_id, history)
+
         self._touch_meta(session_id)
         self._track_tokens(response.usage)
-        self._log(query, context, answer)
+        self._log(standalone_query, context, answer)
 
         return answer, response.usage, self.rag.cumulative_tokens
 
